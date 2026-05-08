@@ -16,9 +16,22 @@ android {
         versionName = "1.0"
     }
 
+    signingConfigs {
+        create("release") {
+            // When KEYSTORE_PATH is set (CI signed builds), use production credentials.
+            // Otherwise fall back to the debug keystore so the APK is still installable.
+            val keystorePath = System.getenv("KEYSTORE_PATH")
+            storeFile = file(keystorePath ?: (System.getProperty("user.home") + "/.android/debug.keystore"))
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "android"
+            keyAlias = System.getenv("KEY_ALIAS") ?: "androiddebugkey"
+            keyPassword = System.getenv("KEY_PASSWORD") ?: "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
         }
     }

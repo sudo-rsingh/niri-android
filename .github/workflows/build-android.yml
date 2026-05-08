@@ -65,6 +65,19 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      # Ensure the debug keystore exists so unsigned release builds can self-sign.
+      - name: Create debug keystore if absent
+        if: >
+          github.ref != 'refs/heads/release' &&
+          !(github.event_name == 'workflow_dispatch' && inputs.sign == true)
+        run: |
+          mkdir -p ~/.android
+          [ -f ~/.android/debug.keystore ] || keytool -genkeypair -v \
+            -keystore ~/.android/debug.keystore \
+            -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass android -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US" -noprompt
+
       # Runs for every trigger that isn't a signed build.
       - name: Build APK
         if: >
