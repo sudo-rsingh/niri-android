@@ -2,9 +2,11 @@ package com.niri.launcher.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.IconButton
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -40,6 +43,7 @@ import com.niri.launcher.data.AppInfo
 fun AppPickerScreen(
     apps: List<AppInfo>,
     onAppSelected: (AppInfo) -> Unit,
+    onDismiss: (() -> Unit)? = null,
 ) {
     var query by remember { mutableStateOf("") }
     val filtered = remember(query, apps) {
@@ -50,9 +54,22 @@ fun AppPickerScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color(0xF2050A10))
             .windowInsetsPadding(WindowInsets.statusBars)
             .padding(horizontal = 16.dp),
     ) {
+        if (onDismiss != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                Text("Open app", color = Color.White, fontSize = 16.sp)
+                IconButton(onClick = onDismiss) {
+                    Text("✕", color = Color(0xAAFFFFFF), fontSize = 18.sp)
+                }
+            }
+        }
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },

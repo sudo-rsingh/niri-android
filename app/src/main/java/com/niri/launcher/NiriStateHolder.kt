@@ -17,9 +17,11 @@ class NiriStateHolder(context: Context) {
     private val _tiles = MutableStateFlow<List<NiriTile>>(emptyList())
     val tiles: StateFlow<List<NiriTile>> = _tiles.asStateFlow()
 
-    // Package name of whichever app UsageStatsManager last saw in the foreground.
     private val _focusedPackage = MutableStateFlow<String?>(null)
     val focusedPackage: StateFlow<String?> = _focusedPackage.asStateFlow()
+
+    private val _isPickerOpen = MutableStateFlow(false)
+    val isPickerOpen: StateFlow<Boolean> = _isPickerOpen.asStateFlow()
 
     init {
         loadTiles()
@@ -37,9 +39,9 @@ class NiriStateHolder(context: Context) {
         saveTiles()
     }
 
-    fun setFocusedPackage(pkg: String?) {
-        _focusedPackage.value = pkg
-    }
+    fun setFocusedPackage(pkg: String?) { _focusedPackage.value = pkg }
+    fun openPicker()  { _isPickerOpen.value = true }
+    fun closePicker() { _isPickerOpen.value = false }
 
     private fun saveTiles() {
         val value = _tiles.value.joinToString(",") { "${it.id}|${it.packageName}|${it.activityName}" }

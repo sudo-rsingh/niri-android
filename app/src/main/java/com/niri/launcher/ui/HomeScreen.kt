@@ -28,6 +28,7 @@ import com.niri.launcher.LauncherViewModel
 @Composable
 fun HomeScreen(
     openPicker: Boolean = false,
+    onPickerClosed: () -> Unit = {},
     viewModel: LauncherViewModel = viewModel(),
 ) {
     val context = LocalContext.current
@@ -79,8 +80,13 @@ fun HomeScreen(
             ) {
                 AppPickerScreen(
                     apps = apps,
+                    onDismiss = {
+                        showPicker = false
+                        onPickerClosed()
+                    },
                     onAppSelected = { app ->
                         showPicker = false
+                        onPickerClosed()
                         viewModel.addAndLaunch(context, app)
                     },
                 )

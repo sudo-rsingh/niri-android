@@ -20,12 +20,18 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.niri.launcher.data.AppInfo
+import com.niri.launcher.data.AppRepository
 import com.niri.launcher.data.NiriTile
+import com.niri.launcher.ui.AppPickerScreen
 import com.niri.launcher.ui.NiriStrip
 import com.niri.launcher.ui.theme.NiriLauncherTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class NiriOverlayService : LifecycleService() {
 
@@ -35,9 +41,9 @@ class NiriOverlayService : LifecycleService() {
 
     private val composeOwner = ComposeServiceOwner()
     private var overlayView: ComposeView? = null
-
-    // Kept across polls so the strip stays on whichever app was last seen.
     private var lastForeground: String? = null
+
+    private val allAppsFlow = MutableStateFlow<List<AppInfo>>(emptyList())
 
     override fun onCreate() {
         super.onCreate()
@@ -60,16 +66,35 @@ class NiriOverlayService : LifecycleService() {
         composeOwner.onResume()
 
         overlayView = buildOverlayView()
-        windowManager.addView(overlayView, makeParams())
+        windowManager.addView(overlayView, stripParams())
+
+        // Load all installed apps for the picker.
+        lifecycleScope.launch(Dispatchers.IO) {
+            allAppsFlow.value = AppRepository(this@NiriOverlayService).getInstalledApps()
+        }
 
         lifecycleScope.launch { pollForegroundApp() }
 
-        // Hide the strip when there are no tiles.
+        // When picker opens/closes, resize the overlay window.
+        lifecycleScope.launch {
+            niriState.isPickerOpen.collectLatest { open ->
+                withContext(Dispatchers.Main) {
+                    overlayView?.let {
+                        windowManager.updateViewLayout(it, if (open) pickerParams() else stripParams())
+                    }
+                }
+            }
+        }
+
+        // Hide strip when no tiles or launcher is foreground.
         lifecycleScope.launch {
             niriState.tiles.collectLatest { tiles ->
                 val isUs = lastForeground == packageName
-                overlayView?.visibility =
-                    if (tiles.isEmpty() || isUs) View.GONE else View.VISIBLE
+                if (tiles.isEmpty() && !niriState.isPickerOpen.value) {
+                    overlayView?.visibility = View.GONE
+                } else if (!isUs) {
+                    overlayView?.visibility = View.VISIBLE
+                }
             }
         }
     }
@@ -81,7 +106,7 @@ class NiriOverlayService : LifecycleService() {
     }
 
     // ------------------------------------------------------------------
-    // Overlay
+    // Overlay view — switches between compact strip and full-screen picker
     // ------------------------------------------------------------------
 
     private fun buildOverlayView(): ComposeView = ComposeView(this).apply {
@@ -92,31 +117,52 @@ class NiriOverlayService : LifecycleService() {
         setContent {
             val tiles by niriState.tiles.collectAsState()
             val focused by niriState.focusedPackage.collectAsState()
+            val pickerOpen by niriState.isPickerOpen.collectAsState()
+            val apps by allAppsFlow.collectAsState()
+
             NiriLauncherTheme {
-                NiriStrip(
-                    tiles = tiles,
-                    focusedPackage = focused,
-                    compact = true,
-                    onTileClick = { bringToFront(it) },
-                    onTileClose = { niriState.removeTile(it.id) },
-                    onAddClick = { openPicker() },
-                )
+                if (pickerOpen) {
+                    AppPickerScreen(
+                        apps = apps,
+                        onDismiss = { niriState.closePicker() },
+                        onAppSelected = { app ->
+                            niriState.closePicker()
+                            addAndLaunch(app)
+                        },
+                    )
+                } else {
+                    NiriStrip(
+                        tiles = tiles,
+                        focusedPackage = focused,
+                        compact = true,
+                        onTileClick = { bringToFront(it) },
+                        onTileClose = { niriState.removeTile(it.id) },
+                        onAddClick = { niriState.openPicker() },
+                    )
+                }
             }
         }
     }
 
-    private fun makeParams(): WindowManager.LayoutParams {
-        val h = statusBarHeightPx() + dpToPx(52)
-        return WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            h,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT,
-        ).apply { gravity = Gravity.TOP }
-    }
+    /** Compact strip at the top — non-focusable so keyboard stays with the running app. */
+    private fun stripParams() = WindowManager.LayoutParams(
+        WindowManager.LayoutParams.MATCH_PARENT,
+        statusBarHeightPx() + dpToPx(52),
+        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+        PixelFormat.TRANSLUCENT,
+    ).apply { gravity = Gravity.TOP }
+
+    /** Full-screen picker — focusable so the search field can receive keyboard input. */
+    private fun pickerParams() = WindowManager.LayoutParams(
+        WindowManager.LayoutParams.MATCH_PARENT,
+        WindowManager.LayoutParams.MATCH_PARENT,
+        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+        PixelFormat.TRANSLUCENT,
+    ).apply { gravity = Gravity.TOP }
 
     // ------------------------------------------------------------------
     // Foreground-app detection
@@ -126,14 +172,18 @@ class NiriOverlayService : LifecycleService() {
         lastForeground = queryLastForeground(10_000L)
         while (true) {
             delay(500L)
+            // Skip polling while picker is open — we own the screen.
+            if (niriState.isPickerOpen.value) continue
             val pkg = queryLastForeground(1_500L) ?: continue
             if (pkg == lastForeground) continue
             lastForeground = pkg
             niriState.setFocusedPackage(pkg)
             val isUs = pkg == packageName
             val hasTiles = niriState.tiles.value.isNotEmpty()
-            overlayView?.visibility =
-                if (isUs || !hasTiles) View.GONE else View.VISIBLE
+            withContext(Dispatchers.Main) {
+                overlayView?.visibility =
+                    if (isUs || !hasTiles) View.GONE else View.VISIBLE
+            }
         }
     }
 
@@ -155,7 +205,7 @@ class NiriOverlayService : LifecycleService() {
     // Actions
     // ------------------------------------------------------------------
 
-    fun bringToFront(tile: NiriTile) {
+    private fun bringToFront(tile: NiriTile) {
         val intent = (packageManager.getLaunchIntentForPackage(tile.packageName)
             ?: Intent().setClassName(tile.packageName, tile.activityName)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
@@ -164,16 +214,17 @@ class NiriOverlayService : LifecycleService() {
         startActivity(intent, opts.toBundle())
     }
 
-    private fun openPicker() {
-        startActivity(
-            Intent(this, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                putExtra(MainActivity.EXTRA_OPEN_PICKER, true)
-            }
+    private fun addAndLaunch(app: AppInfo) {
+        val tile = NiriTile(
+            packageName = app.packageName,
+            activityName = app.activityName,
+            label = app.label,
+            icon = app.icon,
         )
+        niriState.addTile(tile)
+        bringToFront(tile)
     }
 
-    /** Screen area below the strip where apps should open. */
     fun appBounds(): Rect {
         val screen = windowManager.currentWindowMetrics.bounds
         return Rect(0, statusBarHeightPx() + dpToPx(52), screen.width(), screen.height())
