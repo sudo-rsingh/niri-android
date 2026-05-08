@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- "N" letterform centred in the safe zone (28–80dp) -->
+    <path
+        android:fillColor="#FF9ECAFF"
+        android:pathData="
+          M30,76 L30,32 L40,32 L62,60 L62,32 L72,32 L72,76
+          L62,76 L40,48 L40,76 Z" />
+</vector>
